@@ -15,6 +15,10 @@ class FlowEventType(StrEnum):
     DATA_PRODUCED = "data_produced"
     FLOW_COMPLETED = "flow_completed"
     FLOW_FAILED = "flow_failed"
+    # 0.5.0 — the runtime's own events on a run's stream
+    ENVELOPE = "envelope"  # the platform sent something to the outside (data: the envelope)
+    GUARD_DECISION = "guard_decision"  # a non-ALLOW verdict of the skill guard
+    TIMER_FIRED = "timer_fired"  # a run timer resumed or escalated the run
 
 
 @dataclass(frozen=True, slots=True)

@@ -8,11 +8,14 @@ Persist every blueprint execution as an inspectable, resumable, replayable run.
     runs = store.list_runs(status=RunStatus.SUSPENDED)
 """
 from neurocore.persistence.base import (
+    EnvelopeRecord,
+    ResumeOutcome,
     RunRecord,
     RunStatus,
     RunStore,
     StepRecord,
     StepStatus,
+    UnitOfWork,
 )
 from neurocore.persistence.checkpoint_adapter import (
     SQLiteCheckpointStore,
@@ -28,6 +31,9 @@ __all__ = [
     "StepRecord",
     "RunStatus",
     "StepStatus",
+    "EnvelopeRecord",
+    "ResumeOutcome",
+    "UnitOfWork",
     "InMemoryRunStore",
     "SQLiteRunStore",
     "SQLiteCheckpointStore",

@@ -39,6 +39,22 @@ Correct resume for graph flows and a dependency-free core. Requires
   everything with a no-op unit of work. `registry.wrap()` is the wrap point
   (`registry.wrapped` counts it) and `_create_skill_instances` uses it, so a
   path that bypassed the contract would have to bypass the registry.
+- **`RunStore` resume protocol, row lease, envelope log, unit of work.**
+  `RunRecord` gains `wait_step_id`, `resume_seq`, `resume_action_id`,
+  `resume_payload`, `lease_owner`, `lease_until`; `RunStatus.QUEUED` is the
+  state between an accepted resume and a worker's claim. New store methods:
+  `request_resume` (a conditional update that flips suspended → queued exactly
+  once; the same `action_id` replays, another one conflicts, a different
+  waiting step is refused), `acquire_lease` / `renew_lease` / `release_lease` /
+  `expired_leases` (one worker executes a run at a time; a stale
+  `expected_resume_seq` is refused so the worker drops its message),
+  `save_envelope` / `latest_envelope` / `load_envelopes` (what the platform last
+  sent, ordered by `seq`), and `unit_of_work` (a transaction every store write
+  joins until `commit` or `rollback`). SQLite files from 0.4.0 get the new
+  columns on open. A conformance suite runs every behaviour against both
+  stores, including fifty parallel resumes accepting exactly one.
+- `FlowEventType.ENVELOPE`, `GUARD_DECISION`, `TIMER_FIRED` for the runtime's
+  own events on a run's stream.
 - **Data bindings pass through.** `FlowGraph` gains `bind` (inputs:
   `"<node_id>.<key>"` reference, `{value: ...}` literal or `{expr: ...}`
   expression; outputs: rename within the node's namespace), `provenance`
