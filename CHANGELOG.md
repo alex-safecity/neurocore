@@ -22,6 +22,23 @@ Correct resume for graph flows and a dependency-free core. Requires
   the ports they set, and nothing upstream re-runs. The other execution paths
   are unchanged.
 
+### Added
+
+- **Data bindings pass through.** `FlowGraph` gains `bind` (inputs:
+  `"<node_id>.<key>"` reference, `{value: ...}` literal or `{expr: ...}`
+  expression; outputs: rename within the node's namespace), `provenance`
+  (per-input provenance class, carried for policy) and `max_visits` (previously
+  accepted and silently dropped); `_build_flow_config` forwards all three, so a
+  blueprint with any `bind` runs in flowengine's namespaced mode — two
+  instances of one skill no longer collide on keys.
+- **Extended `SkillMeta`**: `ports`, `risk_level`, `effects`,
+  `requires_approval`, `cost`, `data_classes`, typed `inputs`/`outputs`
+  (`consumes`/`provides` are kept and merged). `skillmeta_to_componentmeta`
+  maps every field onto flowengine's `ComponentMeta`.
+- **`SkillRegistry(strict_meta=True)`** refuses skills whose `risk_level` is
+  undeclared, for governed catalogues; the default registry stays lenient and
+  maps an undeclared risk to `low` as before.
+
 ### Changed
 
 - **`anthropic` is an optional dependency** (`neurocore-ai[anthropic]`), like

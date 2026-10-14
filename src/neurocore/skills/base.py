@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 from flowengine import BaseComponent, FlowContext
 
@@ -50,6 +50,18 @@ class SkillMeta:
         consumes: Context keys this skill reads.
         config_schema: JSON Schema dict for validating skill config.
         tags: Categorization tags (e.g. ["memory", "graph", "llm"]).
+        ports: Control-out ports the skill may activate (default ``("done",)``).
+        risk_level: Worst-case risk (``low``/``medium``/``high``/``critical``).
+            ``None`` means undeclared; a registry built with ``strict_meta=True``
+            refuses such skills.
+        effects: Real-world effects (``flowengine.agent.meta.KNOWN_EFFECTS`` plus
+            ``write_db``, ``send_message``, ``call_external``).
+        requires_approval: A human must approve before the skill runs.
+        cost: Rough cost per call.
+        data_classes: Data classes the skill may emit or handle.
+        inputs: Typed input specs (``{key: {"type": ..., "required": ...}}``);
+            ``consumes`` is kept for compatibility and merged in.
+        outputs: Typed output specs; ``provides`` is merged in.
     """
 
     name: str
@@ -66,6 +78,19 @@ class SkillMeta:
     retry_delay_base: float = 1.0
     retry_delay_max: float = 60.0
     retry_on: tuple[type[BaseException], ...] = field(default_factory=tuple)
+    # Extended metadata (0.5.0) — maps 1:1 onto flowengine's ComponentMeta
+    ports: tuple[str, ...] = ("done",)
+    risk_level: Literal["low", "medium", "high", "critical"] | None = None
+    effects: tuple[str, ...] = ()
+    requires_approval: bool = False
+    cost: Literal["low", "medium", "high"] | None = None
+    data_classes: tuple[str, ...] = ()
+    inputs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    @property
+    def declares_risk(self) -> bool:
+        return self.risk_level is not None
 
 
 class Skill(BaseComponent):
@@ -226,19 +251,29 @@ def skillmeta_to_componentmeta(meta: SkillMeta) -> Any:
     (``flowengine.agent.meta`` / v0.5.0), so callers degrade gracefully.
     """
     try:
-        from flowengine.agent.meta import ComponentMeta, IOFieldSpec
+        from flowengine.agent.meta import ComponentMeta, IOFieldSpec, PortSpec
     except ImportError:
         return None
 
+    inputs = {key: IOFieldSpec(type="any") for key in meta.consumes}
+    inputs.update({key: IOFieldSpec(**spec) for key, spec in meta.inputs.items()})
+    outputs = {key: IOFieldSpec(type="any") for key in meta.provides}
+    outputs.update({key: IOFieldSpec(**spec) for key, spec in meta.outputs.items()})
     return ComponentMeta(
         name=meta.name,
         description=meta.description,
         version=meta.version,
-        inputs={key: IOFieldSpec(type="any") for key in meta.consumes},
-        outputs={key: IOFieldSpec(type="any") for key in meta.provides},
+        inputs=inputs,
+        outputs=outputs,
+        ports=[PortSpec(name=p) for p in meta.ports],
         tags=list(meta.tags),
         config_schema=dict(meta.config_schema),
+        cost=meta.cost,
+        risk_level=meta.risk_level or "low",
+        effects=list(meta.effects),
+        requires_approval=meta.requires_approval,
         requires_llm=meta.requires_llm,
+        data_classes=list(meta.data_classes),
     )
 
 

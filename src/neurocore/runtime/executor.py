@@ -254,7 +254,7 @@ def _build_flow_config(
         ]
 
     if blueprint.flow.nodes:
-        from flowengine import GraphEdgeConfig, GraphNodeConfig
+        from flowengine import GraphEdgeConfig, GraphNodeConfig, NodeBinding
 
         fe_flow_kwargs["nodes"] = [
             GraphNodeConfig(
@@ -262,6 +262,13 @@ def _build_flow_config(
                 component=node.component,
                 description=node.description,
                 on_error=node.on_error,
+                max_visits=node.max_visits,
+                bind=(
+                    NodeBinding.model_validate(node.bind.model_dump())
+                    if node.bind is not None
+                    else None
+                ),
+                provenance=node.provenance,
             )
             for node in blueprint.flow.nodes
         ]

@@ -33,8 +33,14 @@ class SkillRegistry:
         _skills: Mapping from skill name to skill class.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, strict_meta: bool = False) -> None:
+        """
+        Args:
+            strict_meta: Refuse skills that do not declare ``risk_level`` (a
+                governed catalogue needs every component classified).
+        """
         self._skills: dict[str, type[Skill]] = {}
+        self.strict_meta = strict_meta
 
     def register(self, skill_class: type[Skill], *, replace: bool = False) -> None:
         """Register a skill class.
@@ -63,6 +69,12 @@ class SkillRegistry:
             )
 
         name = meta.name
+
+        if self.strict_meta and not meta.declares_risk:
+            raise SkillError(
+                f"Cannot register {skill_class.__name__}: skill_meta.risk_level is "
+                f"undeclared and this registry requires it (strict_meta=True)"
+            )
 
         if name in self._skills and not replace:
             existing = self._skills[name]

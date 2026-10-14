@@ -65,6 +65,18 @@ class FlowStep(BaseModel):
     on_error: Literal["fail", "skip", "continue"] = "fail"
 
 
+class NodeBinding(BaseModel):
+    """Data bindings of a node (mirrors ``flowengine.config.schema.NodeBinding``).
+
+    ``inputs``: consumed key -> ``"<node_id>.<key>[.path]"`` reference (``flow.<key>``
+    for flow inputs), ``{"value": ...}`` literal or ``{"expr": "..."}`` expression.
+    ``outputs``: produced key -> ``"<own_node_id>.<key>"`` target.
+    """
+
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    outputs: dict[str, str] = Field(default_factory=dict)
+
+
 class FlowGraph(BaseModel):
     """Graph node definition."""
 
@@ -72,6 +84,9 @@ class FlowGraph(BaseModel):
     component: str
     description: str | None = None
     on_error: Literal["fail", "skip", "continue"] = "fail"
+    max_visits: int | None = None
+    bind: NodeBinding | None = None
+    provenance: dict[str, str] | None = None
 
 
 class FlowEdge(BaseModel):
