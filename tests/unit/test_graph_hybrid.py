@@ -1,4 +1,6 @@
-"""Tests for hybrid graph routing: GraphExecutor for ports/conditions/cycles."""
+"""Tests for graph routing: every graph flow runs on flowengine's GraphExecutor
+(ports, conditions, cycles). The predicate that used to pick the concurrent layer
+executor for plain DAGs is gone (0.5.0); ``settings.executor`` may only be "graph"."""
 from __future__ import annotations
 
 from flowengine import FlowContext
@@ -13,8 +15,11 @@ from neurocore.runtime.blueprint import (
     FlowEdge,
     FlowGraph,
 )
+import pytest
+
+from neurocore.errors import BlueprintError
 from neurocore.runtime.executor import (
-    _graph_needs_executor,
+    _check_executor_setting,
     execute_blueprint,
     execute_blueprint_tracked,
 )
@@ -60,30 +65,33 @@ def _cfg():
     return NeuroCoreConfig(persistence=PersistenceConfig(enabled=False))
 
 
-# -- predicate ---------------------------------------------------------------
+# -- executor setting ---------------------------------------------------------
 
-def test_predicate_plain_dag_false():
-    bp = Blueprint(
+def _plain_dag(settings=None):
+    return Blueprint(
         name="bp", components=[BlueprintComponent(name="a", type="mark"),
                                BlueprintComponent(name="b", type="mark")],
-        flow=FlowDefinition(type="graph",
+        flow=FlowDefinition(type="graph", settings=settings or {},
                             nodes=[FlowGraph(id="a", component="a"),
                                    FlowGraph(id="b", component="b")],
                             edges=[FlowEdge(source="a", target="b")]),
     )
-    assert _graph_needs_executor(bp) is False
 
 
-def test_predicate_ports_true():
-    bp = Blueprint(
-        name="bp", components=[BlueprintComponent(name="a", type="mark"),
-                               BlueprintComponent(name="b", type="mark")],
-        flow=FlowDefinition(type="graph",
-                            nodes=[FlowGraph(id="a", component="a"),
-                                   FlowGraph(id="b", component="b")],
-                            edges=[FlowEdge(source="a", target="b", port="yes")]),
-    )
-    assert _graph_needs_executor(bp) is True
+def test_executor_setting_graph_or_absent_is_accepted():
+    _check_executor_setting(_plain_dag())
+    _check_executor_setting(_plain_dag({"executor": "graph"}))
+
+
+def test_executor_setting_concurrent_is_refused():
+    with pytest.raises(BlueprintError, match="removed in 0.5.0"):
+        execute_blueprint(_plain_dag({"executor": "concurrent"}), _registry(Mark), _cfg())
+
+
+def test_plain_dag_runs_on_the_graph_executor():
+    ctx = execute_blueprint(_plain_dag({"executor": "graph"}), _registry(Mark), _cfg())
+    assert ctx.metadata.completed_nodes == ["a", "b"]
+    assert ctx.metadata.node_ports == {"a": None, "b": None}  # GraphExecutor state
 
 
 # -- port routing ------------------------------------------------------------

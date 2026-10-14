@@ -24,6 +24,21 @@ Correct resume for graph flows and a dependency-free core. Requires
 
 ### Added
 
+- **The guarded invocation contract** (`neurocore.runtime.invocation`). Every
+  skill instance the registry hands out is wrapped (`Guarded` / `GuardedAsync`)
+  so that each call, on every execution path, goes through one function,
+  `invoke_skill`: it opens a per-step unit of work (`InvocationPolicy.unit_of_work`,
+  carried in the context — `current_unit_of_work(context)`), asks the guard
+  *before* the call (BLOCK → the step does not run and the implicit `error`
+  port is taken; REVIEW → the run suspends at the node and the resume
+  re-evaluates; WARN → recorded) and *after* it (BLOCK → the step's writes are
+  discarded in namespaced mode), commits on success and rolls back on any
+  exception. Verdicts other than ALLOW are recorded in
+  `metadata.guard_decisions`. The policy — guard, unit of work, observer —
+  is installed on `SkillRegistry(invocation=...)`; the default allows
+  everything with a no-op unit of work. `registry.wrap()` is the wrap point
+  (`registry.wrapped` counts it) and `_create_skill_instances` uses it, so a
+  path that bypassed the contract would have to bypass the registry.
 - **Data bindings pass through.** `FlowGraph` gains `bind` (inputs:
   `"<node_id>.<key>"` reference, `{value: ...}` literal or `{expr: ...}`
   expression; outputs: rename within the node's namespace), `provenance`
@@ -41,6 +56,13 @@ Correct resume for graph flows and a dependency-free core. Requires
 
 ### Changed
 
+- **One executor path for graph flows.** Every `flow.type: graph` blueprint runs
+  on flowengine's `GraphExecutor`; the concurrent layer executor
+  (`_execute_dag_concurrent`) and the routing predicate are removed. Independent
+  nodes now run one after the other in topological order (deterministic, so
+  the last writer of a shared key is deterministic too — bindings give each
+  node its own namespace). `flow.settings.executor` may name `"graph"`; any
+  other value is a `BlueprintError`.
 - **`anthropic` is an optional dependency** (`neurocore-ai[anthropic]`), like
   every other provider SDK. The core — blueprints, skills, graph execution,
   persistence — installs without any LLM SDK; `all-providers` and `dev` include

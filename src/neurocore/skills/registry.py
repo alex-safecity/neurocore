@@ -33,14 +33,36 @@ class SkillRegistry:
         _skills: Mapping from skill name to skill class.
     """
 
-    def __init__(self, *, strict_meta: bool = False) -> None:
+    def __init__(
+        self, *, strict_meta: bool = False, invocation: Any | None = None
+    ) -> None:
         """
         Args:
             strict_meta: Refuse skills that do not declare ``risk_level`` (a
                 governed catalogue needs every component classified).
+            invocation: The :class:`~neurocore.runtime.invocation.InvocationPolicy`
+                installed on every instance the registry hands out (guard, unit
+                of work, observer). Defaults to allow-all with a no-op unit of work.
         """
         self._skills: dict[str, type[Skill]] = {}
         self.strict_meta = strict_meta
+        self._invocation = invocation
+        self.wrapped: int = 0  # instances handed out through the wrap point
+
+    @property
+    def invocation(self) -> Any:
+        if self._invocation is None:
+            from neurocore.runtime.invocation import DEFAULT_POLICY
+
+            return DEFAULT_POLICY
+        return self._invocation
+
+    def wrap(self, instance: Skill) -> Skill:
+        """The registry wrap point: put an instance behind the invocation contract."""
+        from neurocore.runtime.invocation import guard
+
+        self.wrapped += 1
+        return guard(instance, self.invocation)
 
     def register(self, skill_class: type[Skill], *, replace: bool = False) -> None:
         """Register a skill class.

@@ -68,8 +68,10 @@ def _make_registry(*skills):
     return reg
 
 
-def test_independent_nodes_run_concurrently():
-    """Two 100ms skills should finish in ~100ms, not ~200ms."""
+def test_independent_nodes_run_sequentially_in_topological_order():
+    """0.5.0: one executor path (GraphExecutor). Independent roots run one after the
+    other in a deterministic order — two 100ms skills take ~200ms, and a sibling
+    that blocks halts nothing but its own downstream."""
     registry = _make_registry(SlowSkillA, SlowSkillB)
     # Use a diamond pattern where a and b are independent roots merging into m
     bp2 = Blueprint(
@@ -100,7 +102,8 @@ def test_independent_nodes_run_concurrently():
     assert result.get("a_done") is True
     assert result.get("b_done") is True
     assert result.get("merged") is True
-    assert elapsed < 0.25  # Should be ~100ms + overhead, not 200ms+
+    assert elapsed >= 0.18  # sequential: ~200ms
+    assert result.metadata.completed_nodes == ["a", "b", "m"]
 
 
 def test_dependent_nodes_run_in_order():
@@ -204,7 +207,7 @@ def test_dag_with_diamond_pattern():
     assert result.get("d_done") is True
 
 
-def test_dag_context_merge_last_write_wins():
+def test_dag_shared_key_last_in_order_wins():
     registry = _make_registry(WriterSkillX, WriterSkillY, MergeSkill)
     bp = Blueprint(
         name="merge-test",
@@ -228,8 +231,9 @@ def test_dag_context_merge_last_write_wins():
         ),
     )
     result = execute_blueprint(bp, registry, NeuroCoreConfig())
-    # Both write to "value" — last writer wins (non-deterministic which, but one must)
-    assert result.get("value") in ("x", "y")
+    # Both write to "value" on the shared blackboard; topological order makes the
+    # last writer deterministic (y). Bindings give each node its own namespace.
+    assert result.get("value") == "y"
 
 
 def test_dag_missing_edges_raises_blueprint_error():

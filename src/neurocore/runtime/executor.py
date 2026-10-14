@@ -28,7 +28,6 @@ from __future__ import annotations
 import asyncio
 import random
 import time
-from collections import defaultdict, deque
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -189,7 +188,8 @@ def _create_skill_instances(
                 + "; ".join(config_errors)
             )
 
-        instances[comp.name] = instance
+        # The registry wrap point: every instance the executors see is guarded
+        instances[comp.name] = registry.wrap(instance)
         merged_configs[comp.name] = merged_config
 
     return instances, merged_configs
@@ -420,137 +420,14 @@ async def _execute_blueprint_async(
     return context
 
 
-async def _execute_dag_concurrent(
-    blueprint: Blueprint,
-    instances: dict[str, Skill],
-    merged_configs: dict[str, dict[str, Any]],
-    initial_data: dict[str, Any] | None,
-    *,
-    tracker: _Tracker | None = None,
-    base_context: FlowContext | None = None,
-    skip: set[str] | None = None,
-) -> FlowContext:
-    """Execute a DAG blueprint with concurrent layers.
-
-    ``skip`` (node ids) lets a resume omit already-completed nodes whose outputs
-    are restored via ``base_context``. Records per-node history and stops if a
-    node suspends the run.
-    """
-    skip = skip or set()
-    edges = blueprint.flow.edges or []
-    nodes = blueprint.flow.nodes or []
-    in_degree: dict[str, int] = {n.id: 0 for n in nodes}
-    adjacency: dict[str, list[str]] = defaultdict(list)
-    for edge in edges:
-        adjacency[edge.source].append(edge.target)
-        in_degree[edge.target] = in_degree.get(edge.target, 0) + 1
-
-    # Kahn's algorithm to get layers
-    queue: deque[str] = deque(k for k, v in in_degree.items() if v == 0)
-    layers: list[list[str]] = []
-    visited = 0
-    while queue:
-        layer = list(queue)
-        layers.append(layer)
-        visited += len(layer)
-        queue.clear()
-        for node_id in layer:
-            for neighbour in adjacency[node_id]:
-                in_degree[neighbour] -= 1
-                if in_degree[neighbour] == 0:
-                    queue.append(neighbour)
-
-    if visited != len(nodes):
-        raise BlueprintError("DAG contains a cycle — topological sort failed.")
-
-    # Map node IDs to component names
-    node_to_component = {n.id: n.component for n in nodes}
-
-    # Execute each layer concurrently
-    context = base_context if base_context is not None else FlowContext()
-    if initial_data:
-        for k, v in initial_data.items():
-            context.set(k, v)
-    step_index = 0
-    for layer in layers:
-        pending = [node_id for node_id in layer if node_id not in skip]
-        if not pending:
-            continue
-        layer_skills = [instances[node_to_component[node_id]] for node_id in pending]
-        started_iso, started_perf = utcnow_iso(), time.time()
-        try:
-            results = await asyncio.gather(
-                *[_run_skill_async(skill, context) for skill in layer_skills]
-            )
-        except Exception as exc:
-            if tracker is not None:
-                for node_id in pending:
-                    tracker.record_step(
-                        step_index=step_index, component=node_id,
-                        skill=instances[node_to_component[node_id]],
-                        status=StepStatus.FAILED, started_iso=started_iso,
-                        started_perf=started_perf, context=context, error=str(exc),
-                    )
-                    step_index += 1
-            raise
-        # Merge results into context (last write wins per key)
-        for result_ctx in results:
-            for key, value in result_ctx.data.items():
-                context.set(key, value)
-        for node_id in pending:
-            if node_id not in context.metadata.completed_nodes:
-                context.metadata.completed_nodes.append(node_id)
-            if tracker is not None:
-                tracker.record_step(
-                    step_index=step_index, component=node_id,
-                    skill=instances[node_to_component[node_id]],
-                    status=StepStatus.COMPLETED, started_iso=started_iso,
-                    started_perf=started_perf, context=context,
-                )
-                step_index += 1
-        if context.metadata.suspended:
-            break
-
-    return context
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-def _graph_has_cycle(blueprint: Blueprint) -> bool:
-    """True if the blueprint's graph contains a cycle (Kahn's algorithm)."""
-    nodes = blueprint.flow.nodes or []
-    edges = blueprint.flow.edges or []
-    in_degree: dict[str, int] = {n.id: 0 for n in nodes}
-    adjacency: dict[str, list[str]] = defaultdict(list)
-    for edge in edges:
-        adjacency[edge.source].append(edge.target)
-        if edge.target in in_degree:
-            in_degree[edge.target] += 1
-    queue: deque[str] = deque(k for k, v in in_degree.items() if v == 0)
-    visited = 0
-    while queue:
-        nid = queue.popleft()
-        visited += 1
-        for nbr in adjacency[nid]:
-            in_degree[nbr] -= 1
-            if in_degree[nbr] == 0:
-                queue.append(nbr)
-    return visited != len(nodes)
-
-
-def _graph_needs_executor(blueprint: Blueprint) -> bool:
-    """True if a graph flow needs flowengine's GraphExecutor.
-
-    Triggers when any edge declares a ``port`` or ``condition`` (conditional
-    routing), or the graph is cyclic — features the concurrent layer executor
-    does not implement.
-    """
-    edges = blueprint.flow.edges or []
-    if any(e.port or e.condition for e in edges):
-        return True
-    return _graph_has_cycle(blueprint)
+def _check_executor_setting(blueprint: Blueprint) -> None:
+    """``flow.settings.executor`` names the single executor path or nothing."""
+    executor = (blueprint.flow.settings or {}).get("executor")
+    if executor not in (None, "graph"):
+        raise BlueprintError(
+            f"flow.settings.executor={executor!r} is not available: graph flows run on "
+            f"the GraphExecutor only ('graph'); the concurrent executor was removed in 0.5.0."
+        )
 
 
 def _execute_graph_via_engine(
@@ -653,14 +530,11 @@ def execute_blueprint(
 
     has_async = any(is_async_skill(s) for s in skill_instances.values())
 
-    # Hybrid graph routing: flows using edge ports/conditions or cycles go
-    # through flowengine's GraphExecutor (which honors them); plain DAGs keep
-    # the concurrent layer executor below.
-    if (
-        blueprint.flow.type == "graph"
-        and blueprint.flow.edges
-        and _graph_needs_executor(blueprint)
-    ):
+    # Graph flows: one executor path — flowengine's GraphExecutor (ports,
+    # conditions, cycles, bindings, resume). The concurrent layer executor was
+    # removed in 0.5.0; ``settings.executor`` may only name "graph".
+    if blueprint.flow.type == "graph":
+        _check_executor_setting(blueprint)
         try:
             return _execute_graph_via_engine(
                 blueprint, skill_instances, merged_configs, initial_data,
@@ -672,16 +546,9 @@ def execute_blueprint(
                 raise
             raise ExecutionError(f"Blueprint execution failed: {e}") from e
 
-    if has_async or blueprint.flow.type == "graph":
-        # Async path: handles async skills and DAG concurrent execution
+    if has_async:
+        # Async sequential path
         try:
-            if blueprint.flow.type == "graph" and blueprint.flow.edges:
-                return asyncio.run(
-                    _execute_dag_concurrent(
-                        blueprint, skill_instances, merged_configs, initial_data,
-                        tracker=_tracker, base_context=_base_context, skip=_skip,
-                    )
-                )
             return asyncio.run(
                 _execute_blueprint_async(
                     blueprint, skill_instances, merged_configs, initial_data,

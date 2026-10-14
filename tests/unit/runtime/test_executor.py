@@ -185,7 +185,7 @@ class TestCreateSkillInstances:
         )
         instances, configs = _create_skill_instances(bp, registry, neurocore_config)
         assert "my-echo" in instances
-        assert isinstance(instances["my-echo"], EchoSkill)
+        assert isinstance(instances["my-echo"].inner, EchoSkill)  # guarded (0.5.0)
         assert instances["my-echo"].name == "my-echo"
 
     def test_creates_multiple_instances(
@@ -197,8 +197,8 @@ class TestCreateSkillInstances:
         ])
         instances, configs = _create_skill_instances(bp, registry, neurocore_config)
         assert len(instances) == 2
-        assert isinstance(instances["e1"], EchoSkill)
-        assert isinstance(instances["u1"], UpperSkill)
+        assert isinstance(instances["e1"].inner, EchoSkill)  # guarded (0.5.0)
+        assert isinstance(instances["u1"].inner, UpperSkill)
 
     def test_instances_are_initialized(
         self, registry: SkillRegistry, neurocore_config: NeuroCoreConfig
