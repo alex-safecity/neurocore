@@ -741,7 +741,9 @@ def resume_blueprint(
     run = store.load_run(run_id)
     if run is None:
         raise ExecutionError(f"Run not found: {run_id}")
-    queued_resume = run.status == RunStatus.QUEUED and run.resume_seq > 0
+    # a queued resume — or one a worker has already claimed (lease → RUNNING) before
+    # calling here; the lease keeps a second worker out
+    queued_resume = run.status in (RunStatus.QUEUED, RunStatus.RUNNING) and run.resume_seq > 0
     if run.status not in (RunStatus.SUSPENDED, RunStatus.FAILED) and not queued_resume:
         raise ExecutionError(
             f"Run {run_id} has status {run.status}; only suspended, queued (with an "

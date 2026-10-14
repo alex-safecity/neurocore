@@ -193,6 +193,9 @@ def test_a_queued_run_resumes_with_the_accepted_payload():
         run.run_id, action_id="click-1", payload={"choice": "fine-2"}, expected_step_id="n_gate"
     )
     assert outcome.accepted and store.load_run(run.run_id).status == RunStatus.QUEUED
+    # the worker claims the lease first (the row is RUNNING by then), then resumes
+    assert store.acquire_lease(run.run_id, "w1", 30, expected_resume_seq=1)
+    assert store.load_run(run.run_id).status == RunStatus.RUNNING
     resumed = resume_blueprint(run.run_id, _registry(), _config(), run_store=store)
     assert resumed.get("choice") == "fine-2"
     assert store.load_run(run.run_id).status == RunStatus.COMPLETED
