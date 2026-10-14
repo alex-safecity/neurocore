@@ -257,5 +257,5 @@ def test_resume_rejects_completed_run():
     execute_blueprint_tracked(_seq("write-a"), _registry(WriteA), _config(),
                               run_store=store)
     run = store.list_runs()[0]
-    with pytest.raises(ExecutionError, match="only suspended or failed"):
+    with pytest.raises(ExecutionError, match="only suspended, queued"):
         resume_blueprint(run.run_id, _registry(WriteA), _config(), run_store=store)

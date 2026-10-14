@@ -181,3 +181,18 @@ def test_run_record_carries_the_executor_state():
     assert meta["suspended_at_node"] == "n_gate"
     assert meta["node_ports"] == {"n_router": "yes", "n_counter": "done"}
     assert meta["pending_nodes"] == []
+
+
+def test_a_queued_run_resumes_with_the_accepted_payload():
+    """The 0.5.0 resume protocol end to end: request_resume queues the run with the
+    action's payload; the worker that claims it calls resume_blueprint without data."""
+    store = InMemoryRunStore()
+    execute_blueprint_tracked(_acyclic(), _registry(), _config(), run_store=store)
+    run = store.list_runs()[0]
+    outcome = store.request_resume(
+        run.run_id, action_id="click-1", payload={"choice": "fine-2"}, expected_step_id="n_gate"
+    )
+    assert outcome.accepted and store.load_run(run.run_id).status == RunStatus.QUEUED
+    resumed = resume_blueprint(run.run_id, _registry(), _config(), run_store=store)
+    assert resumed.get("choice") == "fine-2"
+    assert store.load_run(run.run_id).status == RunStatus.COMPLETED

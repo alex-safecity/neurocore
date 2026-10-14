@@ -650,8 +650,11 @@ def _finalize_run(
         record.status = RunStatus.SUSPENDED
         record.suspended_at_node = context.metadata.suspended_at_node
         record.suspension_reason = context.metadata.suspension_reason
+        # the step a resume must name (0.5.0 resume protocol): the suspended node
+        record.wait_step_id = context.metadata.suspended_at_node
     else:
         record.status = RunStatus.COMPLETED
+        record.wait_step_id = None
     cid = context.get("checkpoint_id")
     if cid:
         record.checkpoint_id = cid
@@ -722,10 +725,13 @@ def resume_blueprint(
     resume_data: dict[str, Any] | None = None,
     run_store: RunStore | None = None,
 ) -> FlowContext:
-    """Resume a suspended or failed run, optionally injecting ``resume_data``.
+    """Resume a suspended, queued or failed run, optionally injecting ``resume_data``.
 
     Suspended runs (e.g. paused at an approval gate) continue from where they
-    stopped; failed runs re-run from the failed step (completed steps are
+    stopped; a **queued** run (0.5.0 resume protocol: :meth:`RunStore.request_resume`
+    accepted an action and a worker claimed the lease) continues the same way and,
+    when the caller passes no ``resume_data``, takes the accepted ``resume_payload``
+    from the record; failed runs re-run from the failed step (completed steps are
     skipped). Works for both the sync (flowengine checkpoint) and async/DAG
     (restored FlowContext) execution paths.
     """
@@ -735,11 +741,14 @@ def resume_blueprint(
     run = store.load_run(run_id)
     if run is None:
         raise ExecutionError(f"Run not found: {run_id}")
-    if run.status not in (RunStatus.SUSPENDED, RunStatus.FAILED):
+    queued_resume = run.status == RunStatus.QUEUED and run.resume_seq > 0
+    if run.status not in (RunStatus.SUSPENDED, RunStatus.FAILED) and not queued_resume:
         raise ExecutionError(
-            f"Run {run_id} has status {run.status}; only suspended or failed "
-            f"runs can be resumed."
+            f"Run {run_id} has status {run.status}; only suspended, queued (with an "
+            f"accepted resume) or failed runs can be resumed."
         )
+    if queued_resume and resume_data is None and run.resume_payload is not None:
+        resume_data = dict(run.resume_payload)
 
     blueprint = Blueprint(**run.blueprint_snapshot)
     tracker = _Tracker(
