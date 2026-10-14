@@ -57,7 +57,9 @@ def test_new_refuses_existing_dir(tmp_path: Path):
         app, ["new", "ollama-agent", "exists", "--dir", str(tmp_path)]
     )
     assert result.exit_code != 0
-    assert "already exists" in result.output
+    # Rich wraps the message at the terminal width; a long tmp path can split the
+    # phrase across lines, so compare on collapsed whitespace.
+    assert "already exists" in " ".join(result.output.split())
 
 
 @pytest.mark.parametrize("template", sorted(TEMPLATES))
