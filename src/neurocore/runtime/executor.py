@@ -555,12 +555,15 @@ def _execute_graph_via_engine(
     has_async: bool,
     tracker: _Tracker | None,
     base_context: FlowContext | None,
+    resume_node: str | None = None,
 ) -> FlowContext:
     """Run a graph flow through flowengine's GraphExecutor (ports/conditions/cycles).
 
     Uses the async executor when any skill is async (awaits coroutine ``process``),
     else the sync executor. Records per-step history via the tracker (timings +
-    completed_nodes are populated by GraphExecutor).
+    completed_nodes are populated by GraphExecutor). ``resume_node`` re-enters a
+    suspended run at that node (flowengine >= 0.7); completed nodes are skipped
+    and propagate the ports they set.
     """
     from flowengine import GraphExecutor
     from flowengine.eval.evaluator import ConditionEvaluator
@@ -579,9 +582,11 @@ def _execute_graph_via_engine(
             context.set(key, value)
     try:
         if has_async:
-            context = asyncio.run(executor.execute_async(context))
+            context = asyncio.run(
+                executor.execute_async(context, resume_node=resume_node)
+            )
         else:
-            context = executor.execute(context)
+            context = executor.execute(context, resume_node=resume_node)
     except Exception:
         if tracker is not None:
             _record_sync_steps(tracker, context, instances, failed=True)
@@ -600,6 +605,7 @@ def execute_blueprint(
     _tracker: _Tracker | None = None,
     _base_context: FlowContext | None = None,
     _skip: set[str] | None = None,
+    _resume_node: str | None = None,
 ) -> FlowContext:
     """Execute a blueprint. Supports both sync and async skills.
 
@@ -652,6 +658,7 @@ def execute_blueprint(
             return _execute_graph_via_engine(
                 blueprint, skill_instances, merged_configs, initial_data,
                 has_async=has_async, tracker=_tracker, base_context=_base_context,
+                resume_node=_resume_node,
             )
         except Exception as e:
             if isinstance(e, (BlueprintError, ExecutionError)):
@@ -901,8 +908,11 @@ def resume_blueprint(
         _finalize_run(store, run, context, started_perf)
         return context
 
-    # Async/DAG path: the stored final_context IS the checkpoint.
+    # Async/DAG path: the stored final_context IS the checkpoint. The
+    # GraphExecutor re-enters at the suspended node; the other paths skip
+    # completed nodes.
     context = FlowContext.from_dict(run.final_context or {})
+    resume_node = context.metadata.suspended_at_node
     context.metadata.suspended = False
     context.metadata.suspended_at_node = None
     context.metadata.suspension_reason = None
@@ -913,6 +923,7 @@ def resume_blueprint(
         context = execute_blueprint(
             blueprint, registry, neurocore_config,
             _tracker=tracker, _base_context=context, _skip=skip,
+            _resume_node=resume_node,
         )
     except Exception as exc:
         run.status = RunStatus.FAILED

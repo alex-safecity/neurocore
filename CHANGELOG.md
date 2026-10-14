@@ -5,6 +5,30 @@ All notable changes to NeuroCore will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-10-14
+
+Correct resume for graph flows and a dependency-free core. Requires
+`flowengine>=0.7.0`.
+
+### Fixed
+
+- **`resume_blueprint` re-enters at the suspended node.** For flows routed
+  through flowengine's `GraphExecutor` (ports, conditions, cycles) the resume
+  passed a context with `suspended_at_node` cleared, so the executor restarted
+  from the roots (cyclic flows re-executed every upstream node) or skipped the
+  suspended node when it sat behind a port edge and reported the run complete
+  (acyclic flows). The suspended node is now handed to the executor
+  (`execute(..., resume_node=...)`), completed nodes are skipped and propagate
+  the ports they set, and nothing upstream re-runs. The other execution paths
+  are unchanged.
+
+### Changed
+
+- **`anthropic` is an optional dependency** (`neurocore-ai[anthropic]`), like
+  every other provider SDK. The core — blueprints, skills, graph execution,
+  persistence — installs without any LLM SDK; `all-providers` and `dev` include
+  it. `AnthropicProvider` imports the SDK lazily as before.
+
 ## [0.4.0] — 2026-06-15
 
 Realistic graph execution: NeuroCore graph flows now honor edge **ports**,

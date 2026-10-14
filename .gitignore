@@ -1,5 +1,8 @@
 .claude/
 IMPLEMENTATION_PLAN.md
+AC1-REQUIREMENTS.md
+AC1-*.md
+design/
 .env
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -60,3 +63,6 @@ Thumbs.db
 
 # Data
 data/
+
+# Docs build output
+docs/_build/

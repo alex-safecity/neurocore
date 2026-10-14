@@ -61,7 +61,10 @@ class LLMProvider(Protocol):
 
 
 class AnthropicProvider:
-    """Anthropic Claude provider using the anthropic SDK."""
+    """Anthropic Claude provider using the anthropic SDK.
+
+    Install: pip install "neurocore-ai[anthropic]"
+    """
 
     def __init__(self, api_key: str, model: str = "claude-sonnet-4-6") -> None:
         import anthropic
